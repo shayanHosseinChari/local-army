@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <style>
+* { box-sizing: border-box; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+  background: #10151c; overscroll-behavior: none; }
+canvas { display: block; touch-action: none; }
+#status { position: absolute; top: max(16px, env(safe-area-inset-top));
+  left: max(20px, env(safe-area-inset-left)); right: 20px; color: white;
+  font: 12px sans-serif; text-shadow: 0 1px 3px black; z-index: 4; pointer-events: none; }
+#crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 20px; height: 20px; z-index: 2; pointer-events: none; }
+#crosshair::before, #crosshair::after { content: ''; position: absolute;
+  background: white; box-shadow: 0 0 3px black; }
+#crosshair::before { width: 20px; height: 2px; top: 9px; left: 0; }
+#crosshair::after { width: 2px; height: 20px; left: 9px; top: 0; }
+#crosshair.hit::before, #crosshair.hit::after { background: #4ade80; }
+#joystick { position: absolute; left: max(28px, env(safe-area-inset-left));
+  bottom: max(28px, env(safe-area-inset-bottom)); width: 130px; height: 130px;
+  border-radius: 50%; background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.25); z-index: 3; touch-action: none; }
+#stick { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px;
+  margin-left: -27px; margin-top: -27px; border-radius: 50%;
+  background: rgba(255,255,255,0.45); border: 2px solid rgba(255,255,255,0.65);
+  pointer-events: none; }
+#fireButton { position: absolute; right: max(32px, env(safe-area-inset-right));
+  bottom: max(64px, env(safe-area-inset-bottom)); width: 82px; height: 82px;
+  border-radius: 50%; border: 2px solid rgba(255,255,255,0.7);
+  background: rgba(220,50,50,0.4); color: white; font: bold 15px sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 5; touch-action: none; }
+#fireButton:active { background: rgba(255,80,80,0.75); }
+#hint { position: absolute; right: max(28px, env(safe-area-inset-right));
+  bottom: 20px; color: rgba(255,255,255,0.65); font: 11px sans-serif;
+  z-index: 2; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="status">Loading Three.js...</div>
+  <div id="crosshair"></div>
+  <div id="joystick"><div id="stick"></div></div>
+  <div id="fireButton">FIRE</div>
+  <div id="hint">LEFT: MOVE &nbsp; RIGHT: LOOK</div>
+  <script>
+    function setStatus(message) {
+      document.getElementById('status').textContent = message;
+    }
+    function reportError(error) {
+      const message = error && error.message ? error.message : String(error);
+      setStatus('ERROR: ' + message);
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({type: 'error', message: message}));
+      }
+    }
+    window.addEventListener('error', function(event) {
+      if (event.message) reportError(event.message);
+    });
+    window.addEventListener('unhandledrejection', function(event) {
+      reportError(event.reason || 'Unhandled promise rejection');
+    });
+
+    
+function createWorld(THREE, config) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#10151c');
+
+  const camera = new THREE.PerspectiveCamera(
+    config.camera.fov, innerWidth / innerHeight, 0.1, 100
+  );
+  camera.position.set(0, config.player.eyeHeight, 6);
+  camera.lookAt(0, 1.4, -4);
+  camera.rotation.reorder('YXZ');
+
+  const renderer = new THREE.WebGLRenderer({antialias: false});
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, config.graphics.maxPixelRatio));
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  scene.add(new THREE.HemisphereLight(0xdceeff, 0x303030, 2));
+  const sun = new THREE.DirectionalLight(0xffffff, 2);
+  sun.position.set(4, 8, 5);
+  scene.add(sun);
+
+  const obstacles = [];
+  const shootables = [];
+  function box(w, h, d, color, x, y, z, solid) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({color: color, roughness: 0.85})
+    );
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    shootables.push(mesh);
+    if (solid) {
+      obstacles.push({
+        minX: x - w / 2, maxX: x + w / 2,
+        minZ: z - d / 2, maxZ: z + d / 2
+      });
+    }
+    return mesh;
+  }
+
+  box(20, 0.2, 24, '#263442', 0, -0.1, -2, false);
+  box(20, 5, 0.3, '#46566a', 0, 2.5, -14, false);
+  box(20, 5, 0.3, '#46566a', 0, 2.5, 10, false);
+  box(0.3, 5, 24, '#354456', -10, 2.5, -2, false);
+  box(0.3, 5, 24, '#354456', 10, 2.5, -2, false);
+  box(1.5, 1.5, 1.5, '#b08045', -3, 0.75, -3, true);
+  box(2, 2, 2, '#98703e', 3, 1, -7, true);
+  const target = box(1, 1, 1, '#ff4949', 0, 1.4, -4, false);
+
+  const grid = new THREE.GridHelper(20, 20, 0x63788c, 0x3c4c5e);
+  grid.position.set(0, 0.01, -2);
+  scene.add(grid);
+
+  function resize() {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  }
+
+  function dispose() {
+    scene.traverse(function(object) {
+      if (object.geometry) object.geometry.dispose();
+      if (object.material) {
+        const materials = Array.isArray(object.material)
+          ? object.material : [object.material];
+        materials.forEach(function(material) { material.dispose(); });
+      }
+    });
+    renderer.dispose();
+    renderer.domElement.remove();
+  }
+
+  return {
+    scene, camera, renderer, obstacles, shootables, target,
+    bounds: {minX: -9.85, maxX: 9.85, minZ: -13.85, maxZ: 9.85},
+    resize, dispose
+  };
+}
+
+    
+function createPhysics(world, config) {
+  const radius = config.player.radius;
+  function canStandAt(x, z) {
+    const b = world.bounds;
+    if (x < b.minX + radius || x > b.maxX - radius ||
+        z < b.minZ + radius || z > b.maxZ - radius) return false;
+    return !world.obstacles.some(function(o) {
+      return x > o.minX - radius && x < o.maxX + radius &&
+             z > o.minZ - radius && z < o.maxZ + radius;
+    });
+  }
+
+  function move(input, delta) {
+    const yaw = world.camera.rotation.y;
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
+    const dx = (input.x * cos + input.y * sin) * config.player.speed * delta;
+    const dz = (-input.x * sin + input.y * cos) * config.player.speed * delta;
+    const position = world.camera.position;
+
+    // Small substeps reduce tunnelling if speed is increased later.
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.1));
+    for (let i = 0; i < steps; i++) {
+      if (canStandAt(position.x + dx / steps, position.z)) position.x += dx / steps;
+      if (canStandAt(position.x, position.z + dz / steps)) position.z += dz / steps;
+    }
+  }
+  return {canStandAt, move};
+}
+
+    
+function createControls(world, config) {
+  const canvas = world.renderer.domElement;
+  const joystick = document.getElementById('joystick');
+  const stick = document.getElementById('stick');
+  const input = {x: 0, y: 0};
+  const removers = [];
+  let moveId = null;
+  let lookId = null;
+  let lastX = 0;
+  let lastY = 0;
+
+  function listen(element, name, handler) {
+    element.addEventListener(name, handler);
+    removers.push(function() { element.removeEventListener(name, handler); });
+  }
+  function updateStick(event) {
+    const rect = joystick.getBoundingClientRect();
+    const dx = event.clientX - (rect.left + rect.width / 2);
+    const dy = event.clientY - (rect.top + rect.height / 2);
+    const distance = Math.hypot(dx, dy);
+    const limit = 38;
+    const scale = distance > limit ? limit / distance : 1;
+    const x = dx * scale;
+    const y = dy * scale;
+    stick.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+    input.x = distance < 5 ? 0 : x / limit;
+    input.y = distance < 5 ? 0 : y / limit;
+  }
+  function resetMovement() {
+    const oldId = moveId;
+    moveId = null;
+    input.x = 0;
+    input.y = 0;
+    stick.style.transform = 'translate(0px,0px)';
+    if (oldId !== null && joystick.hasPointerCapture(oldId)) {
+      joystick.releasePointerCapture(oldId);
+    }
+  }
+  function resetLook() {
+    const oldId = lookId;
+    lookId = null;
+    if (oldId !== null && canvas.hasPointerCapture(oldId)) {
+      canvas.releasePointerCapture(oldId);
+    }
+  }
+  function reset() { resetMovement(); resetLook(); }
+
+  listen(joystick, 'pointerdown', function(event) {
+    if (moveId !== null) return;
+    event.preventDefault();
+    moveId = event.pointerId;
+    joystick.setPointerCapture(moveId);
+    updateStick(event);
+  });
+  listen(joystick, 'pointermove', function(event) {
+    if (event.pointerId !== moveId) return;
+    event.preventDefault();
+    updateStick(event);
+  });
+  function stopMovement(event) {
+    if (event.pointerId === moveId) resetMovement();
+  }
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function(name) {
+    listen(joystick, name, stopMovement);
+  });
+
+  listen(canvas, 'pointerdown', function(event) {
+    if (event.clientX < innerWidth / 2 || lookId !== null) return;
+    event.preventDefault();
+    lookId = event.pointerId;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    canvas.setPointerCapture(lookId);
+  });
+  listen(canvas, 'pointermove', function(event) {
+    if (event.pointerId !== lookId) return;
+    event.preventDefault();
+    const rotation = world.camera.rotation;
+    rotation.y -= (event.clientX - lastX) * config.camera.sensitivity;
+    rotation.x -= (event.clientY - lastY) * config.camera.sensitivity;
+    rotation.x = Math.max(-config.camera.maxPitch,
+      Math.min(config.camera.maxPitch, rotation.x));
+    lastX = event.clientX;
+    lastY = event.clientY;
+  });
+  function stopLooking(event) {
+    if (event.pointerId === lookId) resetLook();
+  }
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function(name) {
+    listen(canvas, name, stopLooking);
+  });
+
+  return {
+    input, reset,
+    dispose: function() {
+      reset();
+      removers.forEach(function(remove) { remove(); });
+    }
+  };
+}
+
+    
+function createCombat(THREE, world, config, setStatus) {
+  const button = document.getElementById('fireButton');
+  const crosshair = document.getElementById('crosshair');
+  const raycaster = new THREE.Raycaster();
+  const center = new THREE.Vector2(0, 0);
+  let score = 0;
+  let shots = 0;
+  let lastShotAt = -Infinity;
+  let respawnAt = 0;
+  let enabled = true;
+
+  function updateHud() {
+    setStatus('STRIKE ZONE | SCORE: ' + score + ' | SHOTS: ' + shots);
+  }
+  function shoot(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const now = performance.now();
+    if (!enabled || document.hidden || now - lastShotAt < config.weapon.cooldownMs) return;
+    lastShotAt = now;
+    shots++;
+
+    world.scene.updateMatrixWorld(true);
+    world.camera.updateMatrixWorld(true);
+    raycaster.setFromCamera(center, world.camera);
+    const hits = raycaster.intersectObjects(
+      world.shootables.filter(function(object) { return object.visible; }), false
+    );
+    if (hits.length > 0 && hits[0].object === world.target) {
+      score += config.weapon.pointsPerHit;
+      world.target.visible = false;
+      crosshair.classList.add('hit');
+      respawnAt = now + config.weapon.respawnMs;
+    }
+    updateHud();
+  }
+
+  function update(now) {
+    if (!respawnAt || now < respawnAt) return;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const x = THREE.MathUtils.randFloat(-7, 7);
+      const z = THREE.MathUtils.randFloat(-11, 2);
+      const distance = Math.hypot(
+        x - world.camera.position.x, z - world.camera.position.z
+      );
+      const blocked = world.obstacles.some(function(o) {
+        return x > o.minX - 0.8 && x < o.maxX + 0.8 &&
+               z > o.minZ - 0.8 && z < o.maxZ + 0.8;
+      });
+      if (blocked || distance <= 2.5) continue;
+      world.target.position.set(x, 1.4, z);
+      world.target.visible = true;
+      crosshair.classList.remove('hit');
+      respawnAt = 0;
+      return;
+    }
+  }
+
+  button.addEventListener('pointerdown', shoot);
+  updateHud();
+  return {
+    update,
+    setEnabled: function(value) { enabled = value; },
+    dispose: function() {
+      enabled = false;
+      button.removeEventListener('pointerdown', shoot);
+      crosshair.classList.remove('hit');
+    }
+  };
+}
+
+    
+function createEngine(world, controls, physics, combat, setStatus) {
+  let frame = 0;
+  let previousTime = performance.now();
+  let disposed = false;
+  let contextLost = false;
+  let nativePaused = false;
+
+  function paused() {
+    return document.hidden || nativePaused || contextLost;
+  }
+  function tick(now) {
+    frame = 0;
+    if (disposed || paused()) return;
+    try {
+      const delta = Math.min(Math.max((now - previousTime) / 1000, 0), 0.05);
+      previousTime = now;
+      physics.move(controls.input, delta);
+      combat.update(now);
+      world.target.rotation.y += delta * 0.6;
+      world.renderer.render(world.scene, world.camera);
+      frame = requestAnimationFrame(tick);
+    } catch (error) {
+      combat.setEnabled(false);
+      controls.reset();
+      reportError(error);
+    }
+  }
+  function syncActivity() {
+    cancelAnimationFrame(frame);
+    frame = 0;
+    controls.reset();
+    combat.setEnabled(!paused());
+    if (!disposed && !paused()) {
+      previousTime = performance.now();
+      frame = requestAnimationFrame(tick);
+    }
+  }
+  function onNativePause() { nativePaused = true; syncActivity(); }
+  function onNativeResume() { nativePaused = false; syncActivity(); }
+  function onContextLost(event) {
+    event.preventDefault();
+    contextLost = true;
+    syncActivity();
+    setStatus('Graphics paused. Waiting for context recovery...');
+  }
+  function onContextRestored() {
+    contextLost = false;
+    world.resize();
+    syncActivity();
+    setStatus('Graphics recovered. Score is retained.');
+  }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    cancelAnimationFrame(frame);
+    document.removeEventListener('visibilitychange', syncActivity);
+    window.removeEventListener('nativePause', onNativePause);
+    window.removeEventListener('nativeResume', onNativeResume);
+    window.removeEventListener('resize', world.resize);
+    window.removeEventListener('pagehide', dispose);
+    world.renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+    world.renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+    controls.dispose();
+    combat.dispose();
+    world.dispose();
+  }
+
+  document.addEventListener('visibilitychange', syncActivity);
+  window.addEventListener('nativePause', onNativePause);
+  window.addEventListener('nativeResume', onNativeResume);
+  window.addEventListener('resize', world.resize);
+  window.addEventListener('pagehide', dispose);
+  world.renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+  world.renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
+  syncActivity();
+  return {dispose};
+}
+
+
+    window.startGame = function() {
+      try {
+        if (!window.THREE) throw new Error('Three.js is unavailable. Check internet access.');
+        const config = {"player":{"speed":3.5,"radius":0.3,"eyeHeight":1.7},"camera":{"fov":70,"sensitivity":0.004,"maxPitch":1.4707963267948965},"graphics":{"maxPixelRatio":1.5},"weapon":{"cooldownMs":220,"respawnMs":300,"pointsPerHit":10}};
+        const world = createWorld(window.THREE, config);
+        const physics = createPhysics(world, config);
+        const controls = createControls(world, config);
+        const combat = createCombat(window.THREE, world, config, setStatus);
+        createEngine(world, controls, physics, combat, setStatus);
+      } catch (error) {
+        reportError(error);
+      }
+    };
+  </script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"
+    onload="window.startGame()"
+    onerror="reportError('Could not load Three.js. Internet access is required.')">
+  </script>
+</body>
+</html>
