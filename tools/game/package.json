@@ -1,0 +1,9 @@
+{
+  "name": "game-source-tools",
+  "private": true,
+  "scripts": {
+    "test": "node run.mjs test",
+    "build": "node run.mjs build"
+  },
+  "devDependencies": { "typescript": "5.9.3" }
+}

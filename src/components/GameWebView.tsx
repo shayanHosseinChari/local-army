@@ -1,7 +1,6 @@
 import React from "react";
 import { StyleSheet, View, StatusBar } from "react-native";
 import { WebView } from "react-native-webview";
-const gameHtml = require("./");
 export default function GameWebView() {
   return (
     <View style={styles.container}>
