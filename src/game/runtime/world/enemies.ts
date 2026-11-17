@@ -377,7 +377,6 @@ export const enemies = String.raw`  // ===== دشمن‌ها =====
         p.trail.scale.y *= 0.95;
       }
 
-      // چک برخورد با بازیکن
       const distToPlayer = p.mesh.position.distanceTo(camera.position);
       if (distToPlayer < 0.5) {
         if (window.applyPlayerDamage) window.applyPlayerDamage(12);

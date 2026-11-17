@@ -102,9 +102,9 @@ export const gameMarkup = `  <div id="status" style="opacity:0">Loading Three.js
     <div id="pauseSubtitle">SETTINGS</div>
     <div id="mapLabel">SELECT MAP</div>
     <div id="mapOptions">
-      <button class="mapOption active" data-map="desert">🏜️ Desert</button>
-      <button class="mapOption" data-map="urban">🏙️ Urban</button>
-      <button class="mapOption" data-map="snow">❄️ Snow</button>
+      <button class="mapOption active" data-map="desert"> Desert</button>
+      <button class="mapOption" data-map="urban"> Urban</button>
+      <button class="mapOption" data-map="snow">Snow</button>
     </div>
     <button id="resumeButton">RESUME</button>
   </div>

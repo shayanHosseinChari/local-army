@@ -1,4 +1,3 @@
-/** Source fragment: assembled in order; shares its parent factory scope. */
 export const terrain = String.raw`  function makeSandTexture(baseColor) {
     const c = document.createElement('canvas');
     c.width = 128; c.height = 128;

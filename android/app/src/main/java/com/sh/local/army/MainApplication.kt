@@ -1,4 +1,4 @@
-package com.strikezone
+package com.sh.local.army
 
 import android.app.Application
 import com.facebook.react.PackageList
